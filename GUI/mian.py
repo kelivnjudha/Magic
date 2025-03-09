@@ -24,14 +24,22 @@ def update_color():
         b = int(b_entry.get())
         if 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255:
             hsv = rgb_to_hsv(r, g, b)
-            lower_h.set(max(0, hsv[0] - 10))
-            upper_h.set(min(180, hsv[0] + 10))
+            # Handle red's dual HSV range (0-10 and 170-180)
+            if hsv[0] < 10:
+                lower_h.set(max(0, hsv[0] - 10))
+                upper_h.set(min(10, hsv[0] + 10))
+            else:  # Handle the upper red range (170-180)
+                lower_h.set(max(170, hsv[0] - 10))
+                upper_h.set(min(180, hsv[0] + 10))
             lower_s.set(max(0, hsv[1] - 50))
             upper_s.set(min(255, hsv[1] + 50))
             lower_v.set(max(0, hsv[2] - 50))
             upper_v.set(min(255, hsv[2] + 50))
             color_label.config(text=f"Target Color: Custom (RGB: {r}, {g}, {b})")
             print(f"Updated target color to RGB: ({r}, {g}, {b})")
+            print(f"HSV Range - Lower H: {lower_h.get()}, Upper H: {upper_h.get()}, "
+                  f"Lower S: {lower_s.get()}, Upper S: {upper_s.get()}, "
+                  f"Lower V: {lower_v.get()}, Upper V: {upper_v.get()}")
         else:
             raise ValueError("RGB values must be between 0 and 255.")
     except ValueError as e:
@@ -41,7 +49,7 @@ def update_color():
 curr_x, curr_y = 960, 540  # Center of 1920x1080 screen
 running = True
 assist_enabled = False
-assist_range = 1000  # Temporarily increased to test mouse movement (was 75)
+assist_range = 163   # Match your current setting from terminal output
 mouse_speed = 19     # Match your image setting
 assist_delay = 150   # Adjustable delay before assist kicks in (ms)
 last_detected_time = 0  # Track when target enters range
@@ -53,6 +61,8 @@ target_x, target_y = None, None  # Track detected target position for drawing li
 frame_queue = Queue(maxsize=1)  # Queue for passing frames to GUI thread
 mask_queue = Queue(maxsize=1)   # Queue for passing masks to a separate display thread
 show_mask = True  # Flag to control Mask window display
+stop_event = threading.Event()  # Event to signal threads to stop
+last_target_x, last_target_y = None, None  # Track previous target for stability
 
 # Setup VNC to Main PC (loopback configuration)
 try:
@@ -81,26 +91,13 @@ def update_assist_delay(val):
     delay_label.config(text=f"Reaction Delay: {assist_delay} ms")
 
 def toggle_assist():
-    global assist_enabled, curr_x, curr_y
+    global assist_enabled
     assist_enabled = assist_var.get()
     status_label.config(text=f"Assist: {'Enabled' if assist_enabled else 'Disabled'} | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
-    
-    # Perform a subtle mouse wiggle when enabling assist to confirm functionality
-    if assist_enabled and vnc_connected:
-        print("Aim assist enabled - performing subtle mouse movement to confirm functionality.")
-        try:
-            for i in range(2):  # Two small movements for a wiggle effect
-                vnc.mouseMove(curr_x + 10, curr_y)  # Move right
-                time.sleep(0.05)  # Small delay for smoothness
-                vnc.mouseMove(curr_x - 10, curr_y)  # Move left
-                time.sleep(0.05)
-            vnc.mouseMove(curr_x, curr_y)  # Return to original position
-            print("Mouse wiggle completed.")
-        except Exception as e:
-            print(f"Error during mouse wiggle: {e}")
-            assist_enabled = False
-            assist_var.set(False)
-            status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
+    if assist_enabled:
+        print("Aim assist enabled.")
+    else:
+        print("Aim assist disabled.")
 
 # GUI Setup
 root = tk.Tk()
@@ -189,10 +186,10 @@ status_label = ttk.Label(root, text=f"Assist: Disabled | VNC: {'Connected' if vn
 status_label.pack(pady=5)
 
 def update_screen():
-    global screen_frame, running
+    global screen_frame
     with mss() as sct:
         monitor = {"top": 0, "left": 0, "width": 1920, "height": 1080}
-        while running:
+        while not stop_event.is_set():
             if not frame_queue.full():
                 screen = sct.grab(monitor)
                 frame = np.array(screen)
@@ -203,8 +200,8 @@ def update_screen():
             time.sleep(0.033)  # ~30 FPS to reduce load
 
 def capture_and_process():
-    global assist_enabled, curr_x, curr_y, screen_frame, running, last_send_time, target_x, target_y, last_detected_time
-    while running:
+    global assist_enabled, curr_x, curr_y, screen_frame, last_send_time, target_x, target_y, last_detected_time, last_target_x, last_target_y
+    while not stop_event.is_set():
         with screen_lock:
             frame = screen_frame
         if frame is None or not assist_enabled:
@@ -242,28 +239,40 @@ def capture_and_process():
                 if dist > 0 and dist <= assist_range:
                     current_time = time.time()
                     if current_time - last_detected_time >= (assist_delay / 1000.0):
-                        # Dynamic movement with speed adjustment and dampening
-                        movement_factor = min(1.0, 0.1 + (assist_range - dist) / assist_range)  # Lightens as it nears
-                        speed_factor = mouse_speed / 100.0  # Apply mouse speed
-                        # Dampen movement when very close to prevent sticking
-                        if dist < assist_range * 0.1:  # Within 10% of range, reduce force
-                            movement_factor *= (dist / (assist_range * 0.1))  # Exponential decay
-                        assist_x = int(dx * movement_factor * speed_factor)
-                        assist_y = int(dy * movement_factor * speed_factor)
+                        # Dynamic movement with controlled speed and pull-back
+                        speed_factor = mouse_speed / 100.0  # Direct speed control
+                        movement_factor = max(0.3, min(1.0, dist / assist_range))  # Min 0.3 for pull-back
+                        print(f"Movement factor: {movement_factor}, Speed factor: {speed_factor}")  # Debug factors
+                        # Dampening when extremely close (within 0.1% of range)
+                        if dist < assist_range * 0.001:
+                            movement_factor *= max(0.1, dist / (assist_range * 0.001))  # Exponential decay, min 10%
+                        # Smooth movement with speed-based cap
+                        max_step = speed_factor * 10  # Max step size based on speed (e.g., 1.9px at speed 19)
+                        assist_x = round(dx * movement_factor * speed_factor)
+                        assist_y = round(dy * movement_factor * speed_factor)
+                        assist_x = max(-max_step, min(assist_x, max_step))
+                        assist_y = max(-max_step, min(assist_y, max_step))
+                        print(f"Assist x: {assist_x}, Assist y: {assist_y}")  # Debug movement values
 
-                        new_x = curr_x + assist_x
-                        new_y = curr_y + assist_y
-                        new_x, new_y = max(0, min(new_x, 1920)), max(0, min(new_y, 1080))
+                        # Stabilize movement and ensure target switch
+                        if (assist_x != 0 or assist_y != 0 or 
+                            abs(dx) > 2 or abs(dy) > 2 or 
+                            (last_target_x is not None and last_target_y is not None and 
+                             (abs(target_x - last_target_x) > 5 or abs(target_y - last_target_y) > 5))):
+                            new_x = curr_x + assist_x
+                            new_y = curr_y + assist_y
+                            new_x, new_y = max(0, min(new_x, 1920)), max(0, min(new_y, 1080))
 
-                        try:
-                            vnc.mouseMove(new_x, new_y)
-                            print(f"Mouse moved to (x: {new_x}, y: {new_y}) from (x: {curr_x}, y: {curr_y})")
-                            curr_x, curr_y = new_x, new_y
-                        except Exception as e:
-                            print(f"Error moving mouse: {e}")
-                            assist_enabled = False
-                            assist_var.set(False)
-                            status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
+                            try:
+                                vnc.mouseMove(int(new_x), int(new_y))  # Ensure integer coordinates
+                                print(f"Mouse moved to (x: {int(new_x)}, y: {int(new_y)}) from (x: {curr_x}, y: {curr_y}) with speed {mouse_speed}")
+                                curr_x, curr_y = int(new_x), int(new_y)  # Update current position as integers
+                                last_target_x, last_target_y = target_x, target_y  # Update last target
+                            except Exception as e:
+                                print(f"Error moving mouse: {e}")
+                                assist_enabled = False
+                                assist_var.set(False)
+                                status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
                     else:
                         print(f"Waiting for reaction delay: {current_time - last_detected_time:.3f}s / {assist_delay / 1000.0}s")
                 else:
@@ -290,7 +299,7 @@ def capture_and_process():
             mask_queue.put(cv2.resize(mask, (320, 180)))
 
 def display_mask():
-    while running:
+    while not stop_event.is_set():
         if not mask_queue.empty():
             mask = mask_queue.get()
             cv2.imshow("Mask", mask)
@@ -299,7 +308,7 @@ def display_mask():
 
 def update_gui():
     global curr_x, curr_y, assist_range, target_x, target_y
-    if running:
+    if not stop_event.is_set():
         try:
             if not frame_queue.empty():
                 frame = frame_queue.get_nowait()
@@ -339,22 +348,31 @@ def update_gui():
             print(f"GUI update error: {e}")
         root.after(33, update_gui)  # ~30 FPS to reduce load
 
+# Store threads for proper cleanup
+screen_thread = threading.Thread(target=update_screen)
+process_thread = threading.Thread(target=capture_and_process)
+mask_thread = threading.Thread(target=display_mask)
+
 # Start threads
-threading.Thread(target=update_screen, daemon=True).start()
-threading.Thread(target=capture_and_process, daemon=True).start()
+screen_thread.start()
+process_thread.start()
 if show_mask:
-    threading.Thread(target=display_mask, daemon=True).start()
+    mask_thread.start()
 
 def on_closing():
-    global running
-    running = False
-    time.sleep(0.2)  # Give threads a moment to stop
+    stop_event.set()  # Signal threads to stop
+    # Wait for threads to finish
+    screen_thread.join()
+    process_thread.join()
+    if show_mask:
+        mask_thread.join()
     try:
         vnc.disconnect()
     except:
         pass
     cv2.destroyAllWindows()
     root.destroy()
+    print("Application closed.")
 
 root.protocol("WM_DELETE_WINDOW", on_closing)
 
