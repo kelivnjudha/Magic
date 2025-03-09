@@ -91,11 +91,13 @@ def update_assist_delay(val):
     delay_label.config(text=f"Reaction Delay: {assist_delay} ms")
 
 def toggle_assist():
-    global assist_enabled
+    global assist_enabled, last_detected_time, last_target_x, last_target_y
     assist_enabled = assist_var.get()
     status_label.config(text=f"Assist: {'Enabled' if assist_enabled else 'Disabled'} | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
     if assist_enabled:
-        print("Aim assist enabled.")
+        print("Aim assist enabled. Resetting target tracking.")
+        last_detected_time = 0  # Reset detection timer for immediate response
+        last_target_x, last_target_y = None, None  # Reset last target on enable
     else:
         print("Aim assist disabled.")
 
@@ -197,7 +199,7 @@ def update_screen():
                 with screen_lock:
                     screen_frame = frame
                 frame_queue.put(frame)  # Pass frame to GUI
-            time.sleep(0.033)  # ~30 FPS to reduce load
+            time.sleep(0.01)  # Increased frequency to ~100 FPS to reduce lag
 
 def capture_and_process():
     global assist_enabled, curr_x, curr_y, screen_frame, last_send_time, target_x, target_y, last_detected_time, last_target_x, last_target_y
@@ -205,7 +207,7 @@ def capture_and_process():
         with screen_lock:
             frame = screen_frame
         if frame is None or not assist_enabled:
-            time.sleep(0.033)  # ~30 FPS to reduce load
+            time.sleep(0.01)  # Increased frequency to ~100 FPS to reduce lag
             continue
         
         center_x, center_y = 960, 540
@@ -241,11 +243,11 @@ def capture_and_process():
                     if current_time - last_detected_time >= (assist_delay / 1000.0):
                         # Dynamic movement with controlled speed and pull-back
                         speed_factor = mouse_speed / 100.0  # Direct speed control
-                        movement_factor = max(0.3, min(1.0, dist / assist_range))  # Min 0.3 for pull-back
+                        movement_factor = max(0.1, min(1.0, dist / assist_range))  # Min 0.1 for gentler pull-back
                         print(f"Movement factor: {movement_factor}, Speed factor: {speed_factor}")  # Debug factors
-                        # Dampening when extremely close (within 0.1% of range)
-                        if dist < assist_range * 0.001:
-                            movement_factor *= max(0.1, dist / (assist_range * 0.001))  # Exponential decay, min 10%
+                        # Dampening when extremely close (within 0.05% of range)
+                        if dist < assist_range * 0.0005:
+                            movement_factor *= max(0.05, dist / (assist_range * 0.0005))  # Exponential decay, min 5%
                         # Smooth movement with speed-based cap
                         max_step = speed_factor * 10  # Max step size based on speed (e.g., 1.9px at speed 19)
                         assist_x = round(dx * movement_factor * speed_factor)
@@ -254,11 +256,14 @@ def capture_and_process():
                         assist_y = max(-max_step, min(assist_y, max_step))
                         print(f"Assist x: {assist_x}, Assist y: {assist_y}")  # Debug movement values
 
-                        # Stabilize movement and ensure target switch
+                        # Enhanced movement condition for target switching
+                        target_changed = (last_target_x is None or last_target_y is None or
+                                          abs(target_x - last_target_x) > 3 or abs(target_y - last_target_y) > 3 or
+                                          abs(target_x - curr_x) > 5 or abs(target_y - curr_y) > 5)
+                        print(f"Last target: ({last_target_x}, {last_target_y}), Current target: ({target_x}, {target_y}), "
+                              f"Target changed: {target_changed}")
                         if (assist_x != 0 or assist_y != 0 or 
-                            abs(dx) > 2 or abs(dy) > 2 or 
-                            (last_target_x is not None and last_target_y is not None and 
-                             (abs(target_x - last_target_x) > 5 or abs(target_y - last_target_y) > 5))):
+                            abs(dx) > 2 or abs(dy) > 2 or target_changed):
                             new_x = curr_x + assist_x
                             new_y = curr_y + assist_y
                             new_x, new_y = max(0, min(new_x, 1920)), max(0, min(new_y, 1080))
@@ -280,10 +285,12 @@ def capture_and_process():
                     print("Target out of range for mouse movement.")
             else:
                 target_x, target_y = None, None
+                last_target_x, last_target_y = None, None  # Reset last target on small target
                 print("Target too small.")
                 last_detected_time = time.time()  # Reset timer on small target
         else:
             target_x, target_y = None, None
+            last_target_x, last_target_y = None, None  # Reset last target when no target is detected
             print("No target detected.")
             last_detected_time = time.time()  # Reset timer on no target
 
@@ -292,6 +299,7 @@ def capture_and_process():
             assist_var.set(False)
             status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
             target_x, target_y = None, None  # Clear target on disable
+            last_target_x, last_target_y = None, None  # Reset last target
             time.sleep(0.2)  # Debounce
 
         # Pass mask to a separate queue for display
