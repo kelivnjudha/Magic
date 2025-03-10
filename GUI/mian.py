@@ -238,111 +238,57 @@ def capture_and_process():
         target_x, target_y = None, None
         
         if contours:
-            # Filter contours by area and color with enhanced debugging
-            for i, contour in enumerate(sorted(contours, key=cv2.contourArea, reverse=True), 1):
-                if cv2.contourArea(contour) > 30:
-                    x, y, w, h = cv2.boundingRect(contour)
-                    region_target_x = x + w // 2
-                    region_target_y = y + h // 2
-                    
-                    # Check color at the contour center
-                    if 0 <= y < region.shape[0] and 0 <= x < region.shape[1]:
-                        bgr_color = region[y, x]
-                        hsv_color = cv2.cvtColor(np.uint8([[bgr_color]]), cv2.COLOR_BGR2HSV)[0][0]
-                        print(f"Contour {i}/{len(contours)} - Color check (BGR): {bgr_color}, HSV: {hsv_color}, Area: {cv2.contourArea(contour)}")
-                        
-                        # Further relaxed color validation for red
-                        if bgr_color[2] > 100 and bgr_color[1] < 150 and bgr_color[0] < 150:
-                            # Calculate centroid of the contour for accuracy
-                            M = cv2.moments(contour)
-                            if M["m00"] != 0:
-                                centroid_x = int(M["m10"] / M["m00"])
-                                centroid_y = int(M["m01"] / M["m00"])
-                                # Calculate mask centroid for reference
-                                mask_moments = cv2.moments(mask)
-                                if mask_moments["m00"] != 0:
-                                    mask_centroid_x = int(mask_moments["m10"] / mask_moments["m00"])
-                                    mask_centroid_y = int(mask_moments["m01"] / mask_moments["m00"])
-                                    offset_x = centroid_x - mask_centroid_x
-                                    offset_y = centroid_y - mask_centroid_y
-                                    print(f"Mask centroid (x: {mask_centroid_x}, y: {mask_centroid_y}), "
-                                          f"Contour centroid offset (x: {offset_x}, y: {offset_y})")
-                                target_x = min(1920, max(0, (center_x - 200) + centroid_x))
-                                target_y = min(1080, max(0, (center_y - 112) + centroid_y + 30 + offset_y))  # Dynamic offset
-                                print(f"Valid red target centroid at region (x: {centroid_x}, y: {centroid_y}), "
-                                      f"screen (x: {target_x}, y: {target_y})")
-                            else:
-                                target_x = min(1920, max(0, (center_x - 200) + region_target_x))
-                                target_y = min(1080, max(0, (center_y - 112) + region_target_y + 30))
-                                print(f"Valid red target center at region (x: {region_target_x}, y: {region_target_y}), "
-                                      f"screen (x: {target_x}, y: {target_y})")
-                            break
+            # Use the largest contour (assumed to be the red target due to HSV mask)
+            largest = max(contours, key=cv2.contourArea)
+            if cv2.contourArea(largest) > 30:
+                M = cv2.moments(largest)
+                if M["m00"] != 0:
+                    centroid_x = int(M["m10"] / M["m00"])
+                    centroid_y = int(M["m01"] / M["m00"])
+                    x, y, w, h = cv2.boundingRect(largest)  # Get bounding box
+                    target_x = min(1920, max(0, (center_x - 200) + centroid_x))  # Center x
+                    target_y = min(1080, max(0, (center_y - 112) + y))  # Top y
+                    print(f"Target at region (x: {centroid_x}, y: {centroid_y}), screen (x: {target_x}, y: {target_y})")
+        
+        if target_x is not None and target_y is not None:
+            # Calculate distance from screen center (960, 540) to target
+            dx, dy = target_x - 960, target_y - 540
+            dist = (dx**2 + dy**2)**0.5
             
-            # Only use fallback if no valid red target is found
-            if target_x is None or target_y is None:
-                print("No valid red target found, checking largest contour as fallback.")
-                largest = max(contours, key=cv2.contourArea)
-                if cv2.contourArea(largest) > 30:
-                    x, y, w, h = cv2.boundingRect(largest)
-                    region_target_x = x + w // 2
-                    region_target_y = y + h // 2
-                    target_x = min(1920, max(0, (center_x - 200) + region_target_x))
-                    target_y = min(1080, max(0, (center_y - 112) + region_target_y + 30))
-                    print(f"Fallback to largest contour at region (x: {region_target_x}, y: {region_target_y}), "
-                          f"screen (x: {target_x}, y: {target_y})")
-            
-            if target_x is not None and target_y is not None:
-                # Calculate distance from screen center (960, 540) to target
-                dx, dy = target_x - 960, target_y - 540
-                dist = (dx**2 + dy**2)**0.5
-                
-                # Calculate distance within the region for reference
-                region_center_x, region_center_y = 200, 112
-                region_dist_x = region_target_x - region_center_x
-                region_dist_y = region_target_y - region_center_y
-                region_dist = (region_dist_x**2 + region_dist_y**2)**0.5
-                
-                # Convert region_dist to screen coordinates for verification
-                screen_dist_from_region = region_dist * (1920 / 400)
-                
-                # Scale assist range (already in screen coordinates)
-                scaled_assist_range = assist_range * range_adjustment
-                print(f"Distance to target (screen): {dist}, Range: {assist_range}, "
-                      f"Distance in region: {region_dist}, Screen Distance from Region: {screen_dist_from_region}, "
-                      f"Scaled Range (screen): {scaled_assist_range}")
+            # Scale assist range
+            scaled_assist_range = assist_range * range_adjustment
+            print(f"Distance to target (screen): {dist}, Range: {assist_range}, Scaled Range (screen): {scaled_assist_range}")
 
-                # Check if target is within assist range for mouse movement
-                if dist <= scaled_assist_range:
-                    current_time = time.time()
-                    if current_time - last_detected_time >= (assist_delay / 1000.0):
-                        # Move mouse directly to target_x, target_y
-                        new_x = target_x
-                        new_y = target_y
-                        new_x, new_y = max(0, min(new_x, 1920)), max(0, min(new_y, 1080))
-                        try:
-                            vnc.mouseMove(int(new_x), int(new_y))
-                            print(f"Mouse moved to (x: {int(new_x)}, y: {int(new_y)}) from (x: {curr_x}, y: {curr_y})")
-                            curr_x, curr_y = int(new_x), int(new_y)
-                            last_target_x, last_target_y = target_x, target_y
-                        except Exception as e:
-                            print(f"Error moving mouse: {e}")
-                            assist_enabled = False
-                            assist_var.set(False)
-                            status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
-                    else:
-                        print(f"Waiting for reaction delay: {current_time - last_detected_time:.3f}s / {assist_delay / 1000.0}s")
+            # Check if target is within assist range for mouse movement
+            if dist <= scaled_assist_range:
+                current_time = time.time()
+                if current_time - last_detected_time >= (assist_delay / 1000.0):
+                    new_x = target_x
+                    new_y = target_y
+                    new_x, new_y = max(0, min(new_x, 1920)), max(0, min(new_y, 1080))
+                    try:
+                        vnc.mouseMove(int(new_x), int(new_y))
+                        print(f"Mouse moved to (x: {int(new_x)}, y: {int(new_y)}) from (x: {curr_x}, y: {curr_y})")
+                        curr_x, curr_y = int(new_x), int(new_y)
+                        last_target_x, last_target_y = target_x, target_y
+                    except Exception as e:
+                        print(f"Error moving mouse: {e}")
+                        assist_enabled = False
+                        assist_var.set(False)
+                        status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
                 else:
-                    last_detected_time = time.time()
-                    print("Target out of range for mouse movement.")
+                    print(f"Waiting for reaction delay: {current_time - last_detected_time:.3f}s / {assist_delay / 1000.0}s")
             else:
-                last_target_x, last_target_y = None, None
-                print("No valid target detected.")
                 last_detected_time = time.time()
+                print("Target out of range for mouse movement.")
         else:
-            target_x, target_y = None, None
             last_target_x, last_target_y = None, None
-            print("No contours detected.")
+            print("No valid target detected.")
             last_detected_time = time.time()
+
+        # Update mask display
+        if show_mask and not mask_queue.full():
+            mask_queue.put(cv2.resize(mask, (320, 180)))
 
         # Toggle assist off with Ctrl+Shift+D
         if keyboard.is_pressed("ctrl+shift+d"):
@@ -352,10 +298,6 @@ def capture_and_process():
             target_x, target_y = None, None
             last_target_x, last_target_y = None, None
             time.sleep(0.2)
-
-        # Update mask display
-        if show_mask and not mask_queue.full():
-            mask_queue.put(cv2.resize(mask, (320, 180)))
 
 def display_mask():
     while not stop_event.is_set():
@@ -384,10 +326,10 @@ def update_gui():
                             target_y_scaled = int(target_y * (canvas_height / 1080.0))
                             target_x_scaled = max(0, min(target_x_scaled, canvas_width - 1))
                             target_y_scaled = max(0, min(target_y_scaled, canvas_height - 1))
-                            print(f"Drawing line from (curr_x: {center_x_scaled}, curr_y: {center_y_scaled}) "
+                            print(f"Drawing line from (center_x: {center_x_scaled}, center_y: {center_y_scaled}) "
                                   f"to (target_x: {target_x_scaled}, target_y: {target_y_scaled})")
                             cv2.line(resized, (center_x_scaled, center_y_scaled), (target_x_scaled, target_y_scaled), (0, 0, 255), 2)
-                            cv2.line(resized, (center_x_scaled, center_y_scaled), (target_x_scaled, target_y_scaled), (0, 255, 0), 1)
+                            cv2.circle(resized, (target_x_scaled, target_y_scaled), 5, (255, 0, 0), -1)  # Blue circle at target
                     success, encoded = cv2.imencode('.ppm', resized)
                     if success:
                         img = tk.PhotoImage(data=encoded.tobytes())
