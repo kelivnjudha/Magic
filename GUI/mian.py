@@ -208,7 +208,7 @@ def update_screen():
             time.sleep(0.002)
 
 def capture_and_process():
-    global assist_enabled, curr_x, curr_y, screen_frame, last_send_time, target_x, target_y, last_detected_time, last_target_x, last_target_y, range_adjustment
+    global assist_enabled, curr_x, curr_y, screen_frame, last_send_time, target_x, target_y, last_detected_time, last_target_x, last_target_y, range_adjustment, mouse_speed, assist_delay
     while not stop_event.is_set():
         with screen_lock:
             frame = screen_frame
@@ -238,55 +238,56 @@ def capture_and_process():
         target_x, target_y = None, None
         
         if contours:
-            # Use the largest contour (assumed to be the red target due to HSV mask)
+            # Use the largest contour (assumed to be the target)
             largest = max(contours, key=cv2.contourArea)
             if cv2.contourArea(largest) > 30:
                 M = cv2.moments(largest)
                 if M["m00"] != 0:
                     centroid_x = int(M["m10"] / M["m00"])
                     centroid_y = int(M["m01"] / M["m00"])
-                    x, y, w, h = cv2.boundingRect(largest)  # Get bounding box
-                    target_x = min(1920, max(0, (center_x - 200) + centroid_x))  # Center x
-                    target_y = min(1080, max(0, (center_y - 112) + y))  # Top y
-                    print(f"Target at region (x: {centroid_x}, y: {centroid_y}), screen (x: {target_x}, y: {target_y})")
+                    x, y, w, h = cv2.boundingRect(largest)
+                    target_x = min(1920, max(0, (center_x - 200) + centroid_x))  # Screen x
+                    target_y = min(1080, max(0, (center_y - 112) + y))  # Screen y
+                    print(f"Target detected at screen (x: {target_x}, y: {target_y})")
         
         if target_x is not None and target_y is not None:
-            # Calculate distance from screen center (960, 540) to target
-            dx, dy = target_x - 960, target_y - 540
+            # Calculate distance from screen center to target
+            dx = target_x - 960
+            dy = target_y - 540
             dist = (dx**2 + dy**2)**0.5
-            
-            # Scale assist range
             scaled_assist_range = assist_range * range_adjustment
-            print(f"Distance to target (screen): {dist}, Range: {assist_range}, Scaled Range (screen): {scaled_assist_range}")
 
-            # Check if target is within assist range for mouse movement
+            # Check if target is within assist range
             if dist <= scaled_assist_range:
                 current_time = time.time()
                 if current_time - last_detected_time >= (assist_delay / 1000.0):
-                    new_x = target_x
-                    new_y = target_y
-                    new_x, new_y = max(0, min(new_x, 1920)), max(0, min(new_y, 1080))
-                    try:
-                        vnc.mouseMove(int(new_x), int(new_y))
-                        print(f"Mouse moved to (x: {int(new_x)}, y: {int(new_y)}) from (x: {curr_x}, y: {curr_y})")
-                        curr_x, curr_y = int(new_x), int(new_y)
-                        last_target_x, last_target_y = target_x, target_y
-                    except Exception as e:
-                        print(f"Error moving mouse: {e}")
-                        assist_enabled = False
-                        assist_var.set(False)
-                        status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
-                else:
-                    print(f"Waiting for reaction delay: {current_time - last_detected_time:.3f}s / {assist_delay / 1000.0}s")
+                    # Calculate distance from current mouse position to target
+                    dx_move = target_x - curr_x
+                    dy_move = target_y - curr_y
+                    move_dist = (dx_move**2 + dy_move**2)**0.5
+                    
+                    if move_dist > 0:
+                        # Dynamic step size: smaller when closer
+                        step = min(mouse_speed / 10.0, move_dist / 2.0)
+                        move_x = curr_x + (dx_move / move_dist) * step
+                        move_y = curr_y + (dy_move / move_dist) * step
+                        new_x, new_y = max(0, min(int(move_x), 1920)), max(0, min(int(move_y), 1080))
+                        try:
+                            vnc.mouseMove(new_x, new_y)
+                            print(f"Mouse moved to (x: {new_x}, y: {new_y}), Distance: {move_dist:.1f}")
+                            curr_x, curr_y = new_x, new_y
+                            last_detected_time = time.time()  # Reset after move
+                        except Exception as e:
+                            print(f"Error moving mouse: {e}. Retrying next cycle.")
+                    else:
+                        print("Mouse is at target.")
+                        last_detected_time = time.time()  # Reset when at target
             else:
-                last_detected_time = time.time()
-                print("Target out of range for mouse movement.")
+                print("Target out of range.")
         else:
-            last_target_x, last_target_y = None, None
-            print("No valid target detected.")
-            last_detected_time = time.time()
+            print("No target detected.")
 
-        # Update mask display
+        # Update mask display if enabled
         if show_mask and not mask_queue.full():
             mask_queue.put(cv2.resize(mask, (320, 180)))
 
@@ -295,8 +296,6 @@ def capture_and_process():
             assist_enabled = False
             assist_var.set(False)
             status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
-            target_x, target_y = None, None
-            last_target_x, last_target_y = None, None
             time.sleep(0.2)
 
 def display_mask():
