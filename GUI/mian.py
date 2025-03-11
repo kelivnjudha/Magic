@@ -416,30 +416,40 @@ def display_mask():
 
 # GUI update function
 def update_gui():
-    global curr_x, curr_y, assist_range, target_x, target_y
+    global curr_x, curr_y, assist_range, target_x, target_y, assist_enabled
     if not stop_event.is_set():
         try:
             if not frame_queue.empty():
                 frame = frame_queue.get_nowait()
                 if len(frame.shape) == 3 and frame.shape[2] == 3:
+                    # Resize the frame to fit the GUI (e.g., 640x360)
                     resized = cv2.resize(frame, (640, 360), interpolation=cv2.INTER_LINEAR)
                     canvas_width, canvas_height = 640, 360
-                    center_x_scaled = int(200 * (canvas_width / capture_width))
-                    center_y_scaled = int(112 * (canvas_height / capture_height))
-                    range_scaled = int(assist_range * (canvas_width / capture_width))  # Corrected scaling
-                    if assist_enabled:
-                        cv2.circle(resized, (center_x_scaled, center_y_scaled), range_scaled, (0, 255, 0), 2)
-                        if target_x is not None and target_y is not None:
-                            target_x_cap = target_x - capture_left
-                            target_y_cap = target_y - capture_top
-                            target_x_scaled = int(target_x_cap * (canvas_width / capture_width))
-                            target_y_scaled = int(target_y_cap * (canvas_height / capture_height))
-                            target_x_scaled = max(0, min(target_x_scaled, canvas_width - 1))
-                            target_y_scaled = max(0, min(target_y_scaled, canvas_height - 1))
-                            print(f"Drawing line from (center_x: {center_x_scaled}, center_y: {center_y_scaled}) "
-                                  f"to (target_x: {target_x_scaled}, target_y: {target_y_scaled})")
-                            cv2.line(resized, (center_x_scaled, center_y_scaled), (target_x_scaled, target_y_scaled), (0, 0, 255), 2)
-                            cv2.circle(resized, (target_x_scaled, target_y_scaled), 5, (255, 0, 0), -1)
+                    
+                    # Define the center of the capture region in GUI coordinates
+                    center_x_scaled = int(200 * (canvas_width / capture_width))  # capture_width is the width of the capture region
+                    center_y_scaled = int(112 * (canvas_height / capture_height))  # capture_height is the height of the capture region
+                    
+                    # Always draw the range circle (green), scaled to GUI size
+                    range_scaled = int(assist_range * (canvas_width / capture_width))
+                    cv2.circle(resized, (center_x_scaled, center_y_scaled), range_scaled, (0, 255, 0), 2)
+                    
+                    # Draw the tracer line (red) and target circle (blue) only if assist is enabled and a target is detected
+                    if assist_enabled and target_x is not None and target_y is not None:
+                        # Convert full-screen target coordinates to captured frame coordinates
+                        target_x_cap = target_x - capture_left  # capture_left is the x-offset of the capture region
+                        target_y_cap = target_y - capture_top   # capture_top is the y-offset of the capture region
+                        # Scale to GUI coordinates
+                        target_x_scaled = int(target_x_cap * (canvas_width / capture_width))
+                        target_y_scaled = int(target_y_cap * (canvas_height / capture_height))
+                        # Clamp coordinates to stay within GUI bounds
+                        target_x_scaled = max(0, min(target_x_scaled, canvas_width - 1))
+                        target_y_scaled = max(0, min(target_y_scaled, canvas_height - 1))
+                        # Draw the tracer line (red) and target circle (blue)
+                        cv2.line(resized, (center_x_scaled, center_y_scaled), (target_x_scaled, target_y_scaled), (0, 0, 255), 2)
+                        cv2.circle(resized, (target_x_scaled, target_y_scaled), 5, (255, 0, 0), -1)
+                    
+                    # Convert the frame to a Tkinter-compatible image
                     success, encoded = cv2.imencode('.ppm', resized)
                     if success:
                         img = tk.PhotoImage(data=encoded.tobytes())
@@ -451,7 +461,7 @@ def update_gui():
                     print("Invalid image format:", frame.shape)
         except Exception as e:
             print(f"GUI update error: {e}")
-        root.after(33, update_gui)
+        root.after(33, update_gui)  # Update every ~33ms (30 FPS)
 
 # Thread management and cleanup
 screen_thread = threading.Thread(target=update_screen)
