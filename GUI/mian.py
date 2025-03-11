@@ -39,6 +39,12 @@ stop_event = threading.Event()
 last_target_x, last_target_y = None, None
 last_move_time = time.time()  # Initialize last_move_time
 
+# Capture region parameters
+capture_left = 760
+capture_top = 428
+capture_width = 400
+capture_height = 225
+
 # Setup VNC to Main PC
 try:
     vnc = api.connect("127.0.0.1", password="200210")
@@ -52,7 +58,7 @@ except Exception as e:
 # GUI control functions
 def update_range(val):
     global assist_range
-    assist_range = min(200, int(float(val))) # Cap at 200px
+    assist_range = min(200, int(float(val)))  # Cap at 200px
     range_label.config(text=f"Range Radius: {assist_range} px")
 
 def update_speed(val):
@@ -119,12 +125,12 @@ def set_pre_tuned_color(color):
         lower_v.set(58)
         upper_v.set(222)
     elif color == "Purple":
-        lower_h.set(151) #140
-        upper_h.set(179) #150
-        lower_s.set(163) #200
-        upper_s.set(255) #255
-        lower_v.set(58) #150
-        upper_v.set(222) #200
+        lower_h.set(151)
+        upper_h.set(179)
+        lower_s.set(163)
+        upper_s.set(255)
+        lower_v.set(58)
+        upper_v.set(222)
     elif color == "Yellow":
         lower_h.set(30)
         upper_h.set(30)
@@ -257,7 +263,7 @@ ttk.Label(hsv_frame, textvariable=upper_v_label_var).pack(side=tk.LEFT, padx=5)
 status_label = ttk.Label(root, text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
 status_label.pack(pady=5)
 
-# _______ Terminal window ________
+# Terminal window
 terminal_frame = ttk.Frame(root)
 terminal_frame.pack(pady=10, fill=tk.BOTH, expand=True)
 
@@ -285,7 +291,7 @@ sys.stdout = RedirectText(terminal_text)
 def update_screen():
     global screen_frame
     with mss() as sct:
-        monitor = {"top": 0, "left": 0, "width": 1920, "height": 1080}
+        monitor = {"top": capture_top, "left": capture_left, "width": capture_width, "height": capture_height}
         while not stop_event.is_set():
             if not frame_queue.full():
                 screen = sct.grab(monitor)
@@ -306,9 +312,8 @@ def capture_and_process():
             time.sleep(0.002)
             continue
         
-        # Screen center and region setup
-        center_x, center_y = 960, 540
-        region = frame[center_y-112:center_y+113, center_x-200:center_x+200]
+        # Use the entire frame as the region since it's already 400x225
+        region = frame
         hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
         
         # Color detection for enemy
@@ -341,42 +346,51 @@ def capture_and_process():
                 min_y = points[0][1]
                 top_points = [p for p in points if p[1] == min_y]
                 avg_x = sum(p[0] for p in top_points) / len(top_points)
-                target_x = min(1920, max(0, (center_x - 200) + avg_x))
-                target_y = min(1080, max(0, (center_y - 112) + min_y + 5))  # Offset 5 pixels down
+                target_x = min(1920, max(0, capture_left + avg_x))
+                target_y = min(1080, max(0, capture_top + min_y + 5))  # Offset 5 pixels down
         
         if target_x is not None and target_y is not None:
-            dx_move = target_x - curr_x
-            dy_move = target_y - curr_y
-            move_dist = (dx_move**2 + dy_move**2)**0.5
+            # Calculate distance from screen center (960, 540)
+            dx = target_x - 960
+            dy = target_y - 540
+            distance = math.sqrt(dx**2 + dy**2)
             
-            if move_dist > 0:  # Only move if the distance is significant
-                current_time = time.time()
-                delta_time = current_time - last_move_time
-                last_move_time = current_time
+            # Only move if target is within assist_range
+            if distance <= assist_range:
+                dx_move = target_x - curr_x
+                dy_move = target_y - curr_y
+                move_dist = (dx_move**2 + dy_move**2)**0.5
                 
-                if delta_time <= 0:
-                    delta_time = 0.001
-                
-                print(f"Target: ({target_x}, {target_y}), Distance: {move_dist}")
-                print(f"delta_time: {delta_time}, mouse_speed: {mouse_speed}, assist_delay: {assist_delay}")
-                
-                if current_time - last_detected_time >= (assist_delay / 1000.0):
-                    base_speed = mouse_speed * 10
-                    tension_factor = mouse_speed / 250.0
-                    step = tension_factor * move_dist
-                    step = max(5, min(step, move_dist))
-                    step *= delta_time * base_speed / 10.0
-                    if step > move_dist:
-                        step = move_dist
+                if move_dist > 0:  # Only move if the distance is significant
+                    current_time = time.time()
+                    delta_time = current_time - last_move_time
+                    last_move_time = current_time
                     
-                    print(f"Step: {step}")
+                    if delta_time <= 0:
+                        delta_time = 0.001
                     
-                    move_x = curr_x + (dx_move / move_dist) * step
-                    move_y = curr_y + (dy_move / move_dist) * step
-                    new_x, new_y = max(0, min(int(move_x), 1920)), max(0, min(int(move_y), 1080))
-                    vnc.mouseMove(new_x, new_y)
-                    curr_x, curr_y = new_x, new_y
-                    last_detected_time = current_time
+                    print(f"Target: ({target_x}, {target_y}), Distance from center: {distance:.1f}, Move distance: {move_dist:.1f}")
+                    print(f"delta_time: {delta_time:.3f}, mouse_speed: {mouse_speed}, assist_delay: {assist_delay}")
+                    
+                    if current_time - last_detected_time >= (assist_delay / 1000.0):
+                        base_speed = mouse_speed * 10
+                        tension_factor = mouse_speed / 250.0
+                        step = tension_factor * move_dist
+                        step = max(5, min(step, move_dist))
+                        step *= delta_time * base_speed / 10.0
+                        if step > move_dist:
+                            step = move_dist
+                        
+                        print(f"Step: {step:.1f}")
+                        
+                        move_x = curr_x + (dx_move / move_dist) * step
+                        move_y = curr_y + (dy_move / move_dist) * step
+                        new_x, new_y = max(0, min(int(move_x), 1920)), max(0, min(int(move_y), 1080))
+                        vnc.mouseMove(new_x, new_y)
+                        curr_x, curr_y = new_x, new_y
+                        last_detected_time = current_time
+            else:
+                print(f"Target outside range: {distance:.1f} > {assist_range}")
         else:
             last_move_time = time.time()
             
@@ -410,14 +424,16 @@ def update_gui():
                 if len(frame.shape) == 3 and frame.shape[2] == 3:
                     resized = cv2.resize(frame, (640, 360), interpolation=cv2.INTER_LINEAR)
                     canvas_width, canvas_height = 640, 360
-                    center_x_scaled = int(960 * (canvas_width / 1920.0))
-                    center_y_scaled = int(540 * (canvas_height / 1080.0))
-                    range_scaled = int(assist_range * (canvas_width / 1920.0))
+                    center_x_scaled = int(200 * (canvas_width / capture_width))
+                    center_y_scaled = int(112 * (canvas_height / capture_height))
+                    range_scaled = int(assist_range * (canvas_width / capture_width))  # Corrected scaling
                     if assist_enabled:
                         cv2.circle(resized, (center_x_scaled, center_y_scaled), range_scaled, (0, 255, 0), 2)
                         if target_x is not None and target_y is not None:
-                            target_x_scaled = int(target_x * (canvas_width / 1920.0))
-                            target_y_scaled = int(target_y * (canvas_height / 1080.0))
+                            target_x_cap = target_x - capture_left
+                            target_y_cap = target_y - capture_top
+                            target_x_scaled = int(target_x_cap * (canvas_width / capture_width))
+                            target_y_scaled = int(target_y_cap * (canvas_height / capture_height))
                             target_x_scaled = max(0, min(target_x_scaled, canvas_width - 1))
                             target_y_scaled = max(0, min(target_y_scaled, canvas_height - 1))
                             print(f"Drawing line from (center_x: {center_x_scaled}, center_y: {center_y_scaled}) "
@@ -459,8 +475,8 @@ def on_closing():
     except:
         pass
     cv2.destroyAllWindows()
-    root.destroy()
     print("Application closed.")
+    root.destroy()
 
 root.protocol("WM_DELETE_WINDOW", on_closing)
 print("Starting GUI updates.")
