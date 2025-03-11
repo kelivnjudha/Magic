@@ -11,42 +11,15 @@ from vncdotool import api
 import colorsys
 import math
 from queue import Queue
+import json
 
 # Function to convert RGB to HSV
 def rgb_to_hsv(r, g, b):
     h, s, v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
     return (int(h * 180), int(s * 255), int(v * 255))
 
-# Function to update HSV based on RGB input
-def update_color():
-    try:
-        r = int(r_entry.get())
-        g = int(g_entry.get())
-        b = int(b_entry.get())
-        if 0 <= r <= 255 and 0 <= g <= 255 and 0 <= b <= 255:
-            hsv = rgb_to_hsv(r, g, b)
-            if hsv[0] < 10:
-                lower_h.set(max(0, hsv[0] - 10))
-                upper_h.set(min(10, hsv[0] + 10))
-            else:
-                lower_h.set(max(170, hsv[0] - 10))
-                upper_h.set(min(180, hsv[0] + 10))
-            lower_s.set(max(0, hsv[1] - 50))
-            upper_s.set(min(255, hsv[1] + 50))
-            lower_v.set(max(0, hsv[2] - 50))
-            upper_v.set(min(255, hsv[2] + 50))
-            color_label.config(text=f"Target Color: Custom (RGB: {r}, {g}, {b})")
-            print(f"Updated target color to RGB: ({r}, {g}, {b})")
-            print(f"HSV Range - Lower H: {lower_h.get()}, Upper H: {upper_h.get()}, "
-                  f"Lower S: {lower_s.get()}, Upper S: {upper_s.get()}, "
-                  f"Lower V: {lower_v.get()}, Upper V: {upper_v.get()}")
-        else:
-            raise ValueError("RGB values must be between 0 and 255.")
-    except ValueError as e:
-        print(f"Error: {e}. Please enter valid integers between 0 and 255.")
-
 # Global variables
-curr_x, curr_y = 960, 540
+curr_x, curr_y = 960, 540  # Center of 1920x1080 screen
 running = True
 assist_enabled = False
 assist_range = 500
@@ -63,7 +36,7 @@ mask_queue = Queue(maxsize=1)
 show_mask = True  # Always active for debugging
 stop_event = threading.Event()
 last_target_x, last_target_y = None, None
-range_adjustment = 1.0  # Initial value, to be adjusted based on feedback
+last_move_time = time.time()  # Initialize last_move_time
 
 # Setup VNC to Main PC
 try:
@@ -75,7 +48,7 @@ except Exception as e:
     print("Please ensure TightVNC Server is running and configured correctly.")
     assist_enabled = False
 
-# Function definitions
+# GUI control functions
 def update_range(val):
     global assist_range
     assist_range = int(float(val))
@@ -92,25 +65,83 @@ def update_assist_delay(val):
     delay_label.config(text=f"Reaction Delay: {assist_delay} ms")
 
 def toggle_assist():
-    global assist_enabled, last_detected_time, last_target_x, last_target_y, lower_h, upper_h, lower_s, upper_s, lower_v, upper_v
+    global assist_enabled, last_detected_time, last_target_x, last_target_y
     assist_enabled = assist_var.get()
     status_label.config(text=f"Assist: {'Enabled' if assist_enabled else 'Disabled'} | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
     if assist_enabled:
-        print("Aim assist enabled. Resetting target tracking and HSV to default red.")
+        print("Aim assist enabled. Resetting target tracking.")
         last_detected_time = 0
         last_target_x, last_target_y = None, None
-        lower_h.set(0)
-        upper_h.set(10)
-        lower_s.set(120)
-        upper_s.set(255)
-        lower_v.set(120)
-        upper_v.set(255)
     else:
         print("Aim assist disabled.")
 
+# Settings save/load functions
+def save_settings():
+    settings = {
+        "hsv": {
+            "lower_h": lower_h.get(),
+            "upper_h": upper_h.get(),
+            "lower_s": lower_s.get(),
+            "upper_s": upper_s.get(),
+            "lower_v": lower_v.get(),
+            "upper_v": upper_v.get()
+        }
+    }
+    try:
+        with open("settings.json", "w") as f:
+            json.dump(settings, f, indent=4)
+        print("Settings saved to settings.json")
+    except Exception as e:
+        print(f"Error saving settings: {e}")
+
+def load_settings():
+    try:
+        with open("settings.json", "r") as f:
+            settings = json.load(f)
+        lower_h.set(settings["hsv"]["lower_h"])
+        upper_h.set(settings["hsv"]["upper_h"])
+        lower_s.set(settings["hsv"]["lower_s"])
+        upper_s.set(settings["hsv"]["upper_s"])
+        lower_v.set(settings["hsv"]["lower_v"])
+        upper_v.set(settings["hsv"]["upper_v"])
+        update_color_label(selected_color.get())
+        print("Settings loaded from settings.json")
+    except Exception as e:
+        print(f"Error loading settings: {e}. Using default values.")
+
+def set_pre_tuned_color(color):
+    if color == "Red":
+        lower_h.set(151) 
+        upper_h.set(179)
+        lower_s.set(163)
+        upper_s.set(255)
+        lower_v.set(58)
+        upper_v.set(222)
+    elif color == "Purple":
+        lower_h.set(151) #140
+        upper_h.set(179) #150
+        lower_s.set(163) #200
+        upper_s.set(255) #255
+        lower_v.set(58) #150
+        upper_v.set(222) #200
+    elif color == "Yellow":
+        lower_h.set(30)
+        upper_h.set(30)
+        lower_s.set(120)
+        upper_s.set(255)
+        lower_v.set(150)
+        upper_v.set(255)
+    update_color_label(color)
+    print(f"Set pre-tuned color: {color}")
+
+def update_color_label(color):
+    color_label.config(text=f"Target Color: {color}")
+
 # GUI Setup
 root = tk.Tk()
-root.title("Helper Assist Beta v1 (Main PC) - Python 3.10.11")
+icon = tk.PhotoImage(file='logo.png')
+root.iconphoto(False, icon)
+root.title("Magic Assist Beta v1 (Main PC) - Python 3.10.11")
 root.geometry("800x700")
 print("Tkinter root initialized.")
 
@@ -151,18 +182,17 @@ delay_slider.set(assist_delay)
 color_frame = ttk.Frame(root)
 color_frame.pack(pady=5)
 
-ttk.Label(color_frame, text="Target Color (RGB):").pack(side=tk.LEFT, padx=5)
-r_entry = tk.Entry(color_frame, width=5)
-r_entry.insert(0, "255")
-r_entry.pack(side=tk.LEFT, padx=2)
-g_entry = tk.Entry(color_frame, width=5)
-g_entry.insert(0, "0")
-g_entry.pack(side=tk.LEFT, padx=2)
-b_entry = tk.Entry(color_frame, width=5)
-b_entry.insert(0, "0")
-b_entry.pack(side=tk.LEFT, padx=2)
-ttk.Button(color_frame, text="Update Color", command=update_color).pack(side=tk.LEFT, padx=5)
-color_label = ttk.Label(color_frame, text="Target Color: Custom (RGB: 255, 0, 0)")
+# Pre-tuned color dropdown
+color_options = ["Red", "Purple", "Yellow"]
+selected_color = tk.StringVar(value="Red")
+ttk.OptionMenu(color_frame, selected_color, "Red", *color_options, command=lambda value: set_pre_tuned_color(value)).pack(side=tk.LEFT, padx=5)
+
+# Save and Load Buttons
+ttk.Button(color_frame, text="Save Settings", command=save_settings).pack(side=tk.LEFT, padx=5)
+ttk.Button(color_frame, text="Load Settings", command=load_settings).pack(side=tk.LEFT, padx=5)
+
+# Target Color Label
+color_label = ttk.Label(color_frame, text="Target Color: Red")
 color_label.pack(side=tk.LEFT, padx=5)
 
 # HSV Adjustment Frame
@@ -170,29 +200,63 @@ hsv_frame = ttk.Frame(root)
 hsv_frame.pack(pady=5)
 
 lower_h = tk.IntVar(value=0)
-upper_h = tk.IntVar(value=10)
-lower_s = tk.IntVar(value=120)
+upper_h = tk.IntVar(value=5)
+lower_s = tk.IntVar(value=200)
 upper_s = tk.IntVar(value=255)
-lower_v = tk.IntVar(value=120)
+lower_v = tk.IntVar(value=180)
 upper_v = tk.IntVar(value=255)
 
+# Labels to display current slider values
+lower_h_label_var = tk.StringVar(value=str(lower_h.get()))
+upper_h_label_var = tk.StringVar(value=str(upper_h.get()))
+lower_s_label_var = tk.StringVar(value=str(lower_s.get()))
+upper_s_label_var = tk.StringVar(value=str(upper_s.get()))
+lower_v_label_var = tk.StringVar(value=str(lower_v.get()))
+upper_v_label_var = tk.StringVar(value=str(upper_v.get()))
+
+# Update labels when slider values change
+lower_h.trace_add("write", lambda *args: lower_h_label_var.set(str(lower_h.get())))
+upper_h.trace_add("write", lambda *args: upper_h_label_var.set(str(upper_h.get())))
+lower_s.trace_add("write", lambda *args: lower_s_label_var.set(str(lower_s.get())))
+upper_s.trace_add("write", lambda *args: upper_s_label_var.set(str(upper_s.get())))
+lower_v.trace_add("write", lambda *args: lower_v_label_var.set(str(lower_v.get())))
+upper_v.trace_add("write", lambda *args: upper_v_label_var.set(str(upper_v.get())))
+
+# Lower H
 ttk.Label(hsv_frame, text="Lower H:").pack(side=tk.LEFT, padx=5)
 ttk.Scale(hsv_frame, from_=0, to=180, orient=tk.HORIZONTAL, variable=lower_h).pack(side=tk.LEFT, padx=5)
+ttk.Label(hsv_frame, textvariable=lower_h_label_var).pack(side=tk.LEFT, padx=5)
+
+# Upper H
 ttk.Label(hsv_frame, text="Upper H:").pack(side=tk.LEFT, padx=5)
 ttk.Scale(hsv_frame, from_=0, to=180, orient=tk.HORIZONTAL, variable=upper_h).pack(side=tk.LEFT, padx=5)
+ttk.Label(hsv_frame, textvariable=upper_h_label_var).pack(side=tk.LEFT, padx=5)
+
+# Lower S
 ttk.Label(hsv_frame, text="Lower S:").pack(side=tk.LEFT, padx=5)
 ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=lower_s).pack(side=tk.LEFT, padx=5)
+ttk.Label(hsv_frame, textvariable=lower_s_label_var).pack(side=tk.LEFT, padx=5)
+
+# Upper S
 ttk.Label(hsv_frame, text="Upper S:").pack(side=tk.LEFT, padx=5)
 ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=upper_s).pack(side=tk.LEFT, padx=5)
+ttk.Label(hsv_frame, textvariable=upper_s_label_var).pack(side=tk.LEFT, padx=5)
+
+# Lower V
 ttk.Label(hsv_frame, text="Lower V:").pack(side=tk.LEFT, padx=5)
 ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=lower_v).pack(side=tk.LEFT, padx=5)
+ttk.Label(hsv_frame, textvariable=lower_v_label_var).pack(side=tk.LEFT, padx=5)
+
+# Upper V
 ttk.Label(hsv_frame, text="Upper V:").pack(side=tk.LEFT, padx=5)
 ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=upper_v).pack(side=tk.LEFT, padx=5)
+ttk.Label(hsv_frame, textvariable=upper_v_label_var).pack(side=tk.LEFT, padx=5)
 
 # Status
 status_label = ttk.Label(root, text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
 status_label.pack(pady=5)
 
+# Screen capture function
 def update_screen():
     global screen_frame
     with mss() as sct:
@@ -207,8 +271,9 @@ def update_screen():
                 frame_queue.put(frame)
             time.sleep(0.002)
 
+# Core aim assist processing function
 def capture_and_process():
-    global assist_enabled, curr_x, curr_y, screen_frame, last_send_time, target_x, target_y, last_detected_time, last_target_x, last_target_y, range_adjustment, mouse_speed, assist_delay
+    global assist_enabled, curr_x, curr_y, screen_frame, last_detected_time, target_x, target_y, last_move_time, mouse_speed, assist_delay
     while not stop_event.is_set():
         with screen_lock:
             frame = screen_frame
@@ -216,80 +281,83 @@ def capture_and_process():
             time.sleep(0.002)
             continue
         
-        # Define the center and capture region (400x225 around center of 1920x1080 screen)
+        # Screen center and region setup
         center_x, center_y = 960, 540
         region = frame[center_y-112:center_y+113, center_x-200:center_x+200]
         hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
         
-        # HSV bounds for target detection
+        # Color detection for enemy
         lower_bound = np.array([lower_h.get(), lower_s.get(), lower_v.get()])
         upper_bound = np.array([upper_h.get(), upper_s.get(), upper_v.get()])
-        mask = cv2.inRange(hsv, lower_bound, upper_bound)
-
-        # Erode and dilate mask to remove noise
-        kernel = np.ones((3, 3), np.uint8)
-        mask = cv2.erode(mask, kernel, iterations=1)
-        mask = cv2.dilate(mask, kernel, iterations=2)
-
-        # Find contours in the mask
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        enemy_mask = cv2.inRange(hsv, lower_bound, upper_bound)
         
-        # Reset target coordinates
+        # Color detection for props (tune these values based on your game)
+        lower_prop = np.array([25, 150, 150])  # Example range, adjust as needed
+        upper_prop = np.array([35, 255, 255])  # Example range, adjust as needed
+        prop_mask = cv2.inRange(hsv, lower_prop, upper_prop)
+        
+        # Final mask: enemy mask minus prop mask
+        final_mask = cv2.bitwise_and(enemy_mask, cv2.bitwise_not(prop_mask))
+        
+        # Apply Canny edge detection for better outline detection
+        edges = cv2.Canny(final_mask, 100, 200)
+        
+        # Find target points from edges, fallback to mask
+        points = cv2.findNonZero(edges)
+        if points is None:
+            points = cv2.findNonZero(final_mask)  # Use mask if no edges found
+        
         target_x, target_y = None, None
         
-        if contours:
-            # Use the largest contour (assumed to be the target)
-            largest = max(contours, key=cv2.contourArea)
-            if cv2.contourArea(largest) > 30:
-                M = cv2.moments(largest)
-                if M["m00"] != 0:
-                    centroid_x = int(M["m10"] / M["m00"])
-                    centroid_y = int(M["m01"] / M["m00"])
-                    x, y, w, h = cv2.boundingRect(largest)
-                    target_x = min(1920, max(0, (center_x - 200) + centroid_x))  # Screen x
-                    target_y = min(1080, max(0, (center_y - 112) + y))  # Screen y
-                    print(f"Target detected at screen (x: {target_x}, y: {target_y})")
+        if points is not None:
+            points = points.reshape(-1, 2)
+            points = sorted(points, key=lambda p: p[1])  # Sort by y-coordinate
+            if points:
+                min_y = points[0][1]
+                top_points = [p for p in points if p[1] == min_y]
+                avg_x = sum(p[0] for p in top_points) / len(top_points)
+                target_x = min(1920, max(0, (center_x - 200) + avg_x))
+                target_y = min(1080, max(0, (center_y - 112) + min_y + 5))  # Offset 5 pixels down
         
         if target_x is not None and target_y is not None:
-            # Calculate distance from screen center to target
-            dx = target_x - 960
-            dy = target_y - 540
-            dist = (dx**2 + dy**2)**0.5
-            scaled_assist_range = assist_range * range_adjustment
-
-            # Check if target is within assist range
-            if dist <= scaled_assist_range:
+            dx_move = target_x - curr_x
+            dy_move = target_y - curr_y
+            move_dist = (dx_move**2 + dy_move**2)**0.5
+            
+            if move_dist > 0:  # Only move if the distance is significant
                 current_time = time.time()
+                delta_time = current_time - last_move_time
+                last_move_time = current_time
+                
+                if delta_time <= 0:
+                    delta_time = 0.001
+                
+                print(f"Target: ({target_x}, {target_y}), Distance: {move_dist}")
+                print(f"delta_time: {delta_time}, mouse_speed: {mouse_speed}, assist_delay: {assist_delay}")
+                
                 if current_time - last_detected_time >= (assist_delay / 1000.0):
-                    # Calculate distance from current mouse position to target
-                    dx_move = target_x - curr_x
-                    dy_move = target_y - curr_y
-                    move_dist = (dx_move**2 + dy_move**2)**0.5
+                    base_speed = mouse_speed * 10
+                    tension_factor = mouse_speed / 250.0
+                    step = tension_factor * move_dist
+                    step = max(5, min(step, move_dist))
+                    step *= delta_time * base_speed / 10.0
+                    if step > move_dist:
+                        step = move_dist
                     
-                    if move_dist > 0:
-                        # Dynamic step size: smaller when closer
-                        step = min(mouse_speed / 10.0, move_dist / 2.0)
-                        move_x = curr_x + (dx_move / move_dist) * step
-                        move_y = curr_y + (dy_move / move_dist) * step
-                        new_x, new_y = max(0, min(int(move_x), 1920)), max(0, min(int(move_y), 1080))
-                        try:
-                            vnc.mouseMove(new_x, new_y)
-                            print(f"Mouse moved to (x: {new_x}, y: {new_y}), Distance: {move_dist:.1f}")
-                            curr_x, curr_y = new_x, new_y
-                            last_detected_time = time.time()  # Reset after move
-                        except Exception as e:
-                            print(f"Error moving mouse: {e}. Retrying next cycle.")
-                    else:
-                        print("Mouse is at target.")
-                        last_detected_time = time.time()  # Reset when at target
-            else:
-                print("Target out of range.")
+                    print(f"Step: {step}")
+                    
+                    move_x = curr_x + (dx_move / move_dist) * step
+                    move_y = curr_y + (dy_move / move_dist) * step
+                    new_x, new_y = max(0, min(int(move_x), 1920)), max(0, min(int(move_y), 1080))
+                    vnc.mouseMove(new_x, new_y)
+                    curr_x, curr_y = new_x, new_y
+                    last_detected_time = current_time
         else:
-            print("No target detected.")
-
-        # Update mask display if enabled
+            last_move_time = time.time()
+            
+        # Update mask display with final_mask
         if show_mask and not mask_queue.full():
-            mask_queue.put(cv2.resize(mask, (320, 180)))
+            mask_queue.put(cv2.resize(final_mask, (320, 180)))
 
         # Toggle assist off with Ctrl+Shift+D
         if keyboard.is_pressed("ctrl+shift+d"):
@@ -298,6 +366,7 @@ def capture_and_process():
             status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
             time.sleep(0.2)
 
+# Mask display function
 def display_mask():
     while not stop_event.is_set():
         if not mask_queue.empty():
@@ -306,6 +375,7 @@ def display_mask():
             cv2.waitKey(1)
         time.sleep(0.033)
 
+# GUI update function
 def update_gui():
     global curr_x, curr_y, assist_range, target_x, target_y
     if not stop_event.is_set():
@@ -328,7 +398,7 @@ def update_gui():
                             print(f"Drawing line from (center_x: {center_x_scaled}, center_y: {center_y_scaled}) "
                                   f"to (target_x: {target_x_scaled}, target_y: {target_y_scaled})")
                             cv2.line(resized, (center_x_scaled, center_y_scaled), (target_x_scaled, target_y_scaled), (0, 0, 255), 2)
-                            cv2.circle(resized, (target_x_scaled, target_y_scaled), 5, (255, 0, 0), -1)  # Blue circle at target
+                            cv2.circle(resized, (target_x_scaled, target_y_scaled), 5, (255, 0, 0), -1)
                     success, encoded = cv2.imencode('.ppm', resized)
                     if success:
                         img = tk.PhotoImage(data=encoded.tobytes())
@@ -342,7 +412,7 @@ def update_gui():
             print(f"GUI update error: {e}")
         root.after(33, update_gui)
 
-# Store threads for proper cleanup
+# Thread management and cleanup
 screen_thread = threading.Thread(target=update_screen)
 process_thread = threading.Thread(target=capture_and_process)
 mask_thread = threading.Thread(target=display_mask)

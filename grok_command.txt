@@ -1,0 +1,10 @@
+After updating the code everything works so well as it should.
+
+Here's are some minor fixes before moving on to dual pc setup and screen capture with NDI (I hope there's not a lot of changes to switch to NDI from mss. Importantly mouse, tracker, range and movement logic)
+
+- I found out that Range Radius is very accurate but range was not limited by the slider value but it was limited by the mask detection.
+Example: When I crank up the Range Radius to 500px, but the mask's windows x and y aren't that big that mean mask can't see so our program isn't detecting anything until target moves into the mask's window frame / range where our line detected and mouse moves.
+
+So solution is either we make the range radius to square or we limit the current circle range radius to 200px max.
+
+But if we choose to do square, we have to change or add more slide adjuster for height slider with height limit of mask's window's height and width slider with width limit of mask's window's width.

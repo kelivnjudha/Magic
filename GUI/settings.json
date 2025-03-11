@@ -1,0 +1,10 @@
+{
+    "hsv": {
+        "lower_h": 0,
+        "upper_h": 5,
+        "lower_s": 200,
+        "upper_s": 255,
+        "lower_v": 180,
+        "upper_v": 255
+    }
+}
