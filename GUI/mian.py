@@ -34,6 +34,7 @@ vnc_connected = False
 target_x, target_y = None, None
 frame_queue = Queue(maxsize=1)
 mask_queue = Queue(maxsize=1)
+mask_image_queue = Queue(maxsize=1)  # New queue for mask images in GUI
 show_mask = True  # Always active for debugging
 stop_event = threading.Event()
 last_target_x, last_target_y = None, None
@@ -149,62 +150,85 @@ root = tk.Tk()
 icon = tk.PhotoImage(file='logo.png')
 root.iconphoto(False, icon)
 root.title("Magic Assist Beta v1 (Main PC) - Python 3.10.11")
-root.geometry("800x700")
+root.geometry("700x700")  # Adjusted to fit two 320x180 canvases side by side
 print("Tkinter root initialized.")
 
-# Canvas for screen capture (scaled to 640x360, 16:9)
-canvas = tk.Canvas(root, width=640, height=360)
-canvas.pack()
+# Canvas for screen capture (scaled to 320x180, 16:9)
+canvas = tk.Canvas(root, width=320, height=180)
+canvas.grid(row=0, column=0, padx=10, pady=5)
 
-# Control Frame
-control_frame = ttk.Frame(root)
-control_frame.pack(pady=10)
+# Canvas for the mask display (same size: 320x180)
+mask_canvas = tk.Canvas(root, width=320, height=180)
+mask_canvas.grid(row=0, column=1, padx=10, pady=5)  # Placed beside capture canvas
+
+# **Control Frame for Enable Aim Assist and Range Radius (Row 1)**
+control_frame_top = ttk.Frame(root)
+control_frame_top.grid(row=1, column=0, columnspan=2, pady=5, sticky="ew")
+root.grid_columnconfigure(0, weight=1)  # Allow horizontal expansion
+root.grid_columnconfigure(1, weight=1)
+
+# Inner frame to group and center Enable Aim Assist and Range Radius
+top_inner_frame = ttk.Frame(control_frame_top)
+top_inner_frame.pack(expand=True)  # Center horizontally
 
 # Enable/Disable Toggle
 assist_var = tk.BooleanVar(value=False)
-ttk.Checkbutton(control_frame, text="Enable Aim Assist", variable=assist_var, command=toggle_assist).pack(side=tk.LEFT, padx=5)
+enable_check = ttk.Checkbutton(top_inner_frame, text="Enable Aim Assist", variable=assist_var, command=toggle_assist)
+enable_check.pack(side=tk.LEFT, padx=(0, 15))  # 15px right padding (half of 30px gap)
 
 # Range Slider
-range_label = ttk.Label(control_frame, text=f"Range Radius: {assist_range} px")
-range_label.pack(side=tk.LEFT, padx=5)
-range_slider = ttk.Scale(control_frame, from_=20, to=200, orient=tk.HORIZONTAL, command=update_range)
-range_slider.pack(side=tk.LEFT, padx=5)
+range_label = ttk.Label(top_inner_frame, text=f"Range Radius: {assist_range} px")
+range_label.pack(side=tk.LEFT, padx=(15, 0))  # 15px left padding (total 30px gap)
+range_slider = ttk.Scale(top_inner_frame, from_=20, to=200, orient=tk.HORIZONTAL, command=update_range, length=200)
+range_slider.pack(side=tk.LEFT)
 range_slider.set(assist_range)
 
+# **Control Frame for Mouse Speed and Reaction Delay (Row 2)**
+control_frame_bottom = ttk.Frame(root)
+control_frame_bottom.grid(row=2, column=0, columnspan=2, pady=5, sticky="ew")
+
+# Inner frame to group and center Mouse Speed and Reaction Delay
+bottom_inner_frame = ttk.Frame(control_frame_bottom)
+bottom_inner_frame.pack(expand=True)  # Center horizontally
+
 # Mouse Speed Slider
-speed_label = ttk.Label(control_frame, text=f"Mouse Speed: {mouse_speed}")
-speed_label.pack(side=tk.LEFT, padx=5)
-speed_slider = ttk.Scale(control_frame, from_=1, to=200, orient=tk.HORIZONTAL, command=update_speed)
-speed_slider.pack(side=tk.LEFT, padx=5)
+speed_label = ttk.Label(bottom_inner_frame, text=f"Mouse Speed: {mouse_speed}")
+speed_label.pack(side=tk.LEFT, padx=(0, 15))  # 15px right padding
+speed_slider = ttk.Scale(bottom_inner_frame, from_=1, to=200, orient=tk.HORIZONTAL, command=update_speed, length=200)
+speed_slider.pack(side=tk.LEFT, padx=(15, 0))  # 15px left padding (total 30px gap)
 speed_slider.set(mouse_speed)
 
 # Reaction Delay Slider
-delay_label = ttk.Label(control_frame, text=f"Reaction Delay: {assist_delay} ms")
-delay_label.pack(side=tk.LEFT, padx=5)
-delay_slider = ttk.Scale(control_frame, from_=0, to=500, orient=tk.HORIZONTAL, command=update_assist_delay)
-delay_slider.pack(side=tk.LEFT, padx=5)
+delay_label = ttk.Label(bottom_inner_frame, text=f"Reaction Delay: {assist_delay} ms")
+delay_label.pack(side=tk.LEFT, padx=(0, 15))  # 15px right padding
+delay_slider = ttk.Scale(bottom_inner_frame, from_=0, to=500, orient=tk.HORIZONTAL, command=update_assist_delay, length=200)
+delay_slider.pack(side=tk.LEFT)
 delay_slider.set(assist_delay)
 
 # Color Selection and Input Frame
 color_frame = ttk.Frame(root)
-color_frame.pack(pady=5)
+color_frame.grid(row=3, column=0, columnspan=2, pady=5, sticky="ew")
 
 # Pre-tuned color dropdown
 color_options = ["Red", "Purple", "Yellow"]
 selected_color = tk.StringVar(value="Red")
-ttk.OptionMenu(color_frame, selected_color, "Red", *color_options, command=lambda value: set_pre_tuned_color(value)).pack(side=tk.LEFT, padx=5)
+ttk.OptionMenu(color_frame, selected_color, "Red", *color_options, command=lambda value: set_pre_tuned_color(value)).grid(row=0, column=0, padx=5, sticky="w")
 
 # Save and Load Buttons
-ttk.Button(color_frame, text="Save Settings", command=save_settings).pack(side=tk.LEFT, padx=5)
-ttk.Button(color_frame, text="Load Settings", command=load_settings).pack(side=tk.LEFT, padx=5)
+ttk.Button(color_frame, text="Save Settings", command=save_settings).grid(row=0, column=1, padx=5)
+ttk.Button(color_frame, text="Load Settings", command=load_settings).grid(row=0, column=2, padx=5)
 
 # Target Color Label
 color_label = ttk.Label(color_frame, text="Target Color: Red")
-color_label.pack(side=tk.LEFT, padx=5)
+color_label.grid(row=0, column=3, padx=5, sticky="w")
 
-# HSV Adjustment Frame
+# **HSV Adjustment Frame**
 hsv_frame = ttk.Frame(root)
-hsv_frame.pack(pady=5)
+hsv_frame.grid(row=4, column=0, columnspan=2, pady=5, sticky="ew")
+
+# Inner frame to group and center UPPER and LOWER HSV groups
+hsv_inner_frame = ttk.Frame(hsv_frame)
+hsv_inner_frame.pack(expand=True)  # Center horizontally
 
 lower_h = tk.IntVar(value=0)
 upper_h = tk.IntVar(value=5)
@@ -229,43 +253,54 @@ upper_s.trace_add("write", lambda *args: upper_s_label_var.set(str(upper_s.get()
 lower_v.trace_add("write", lambda *args: lower_v_label_var.set(str(lower_v.get())))
 upper_v.trace_add("write", lambda *args: upper_v_label_var.set(str(upper_v.get())))
 
-# Lower H
-ttk.Label(hsv_frame, text="Lower H:").pack(side=tk.LEFT, padx=5)
-ttk.Scale(hsv_frame, from_=0, to=180, orient=tk.HORIZONTAL, variable=lower_h).pack(side=tk.LEFT, padx=5)
-ttk.Label(hsv_frame, textvariable=lower_h_label_var).pack(side=tk.LEFT, padx=5)
+# Sub-frames for UPPER and LOWER sections (side by side)
+upper_frame = ttk.Frame(hsv_inner_frame)
+upper_frame.pack(side=tk.LEFT, padx=10)
 
-# Upper H
-ttk.Label(hsv_frame, text="Upper H:").pack(side=tk.LEFT, padx=5)
-ttk.Scale(hsv_frame, from_=0, to=180, orient=tk.HORIZONTAL, variable=upper_h).pack(side=tk.LEFT, padx=5)
-ttk.Label(hsv_frame, textvariable=upper_h_label_var).pack(side=tk.LEFT, padx=5)
+lower_frame = ttk.Frame(hsv_inner_frame)
+lower_frame.pack(side=tk.LEFT, padx=10)
 
-# Lower S
-ttk.Label(hsv_frame, text="Lower S:").pack(side=tk.LEFT, padx=5)
-ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=lower_s).pack(side=tk.LEFT, padx=5)
-ttk.Label(hsv_frame, textvariable=lower_s_label_var).pack(side=tk.LEFT, padx=5)
+# UPPER Section (Vertical Stack)
+ttk.Label(upper_frame, text="UPPER").grid(row=0, column=0, columnspan=2, sticky="w")
+ttk.Label(upper_frame, text="H:").grid(row=1, column=0, sticky="w")
+ttk.Scale(upper_frame, from_=0, to=180, orient=tk.HORIZONTAL, variable=upper_h, length=200).grid(row=1, column=1, sticky="ew")
+ttk.Label(upper_frame, textvariable=upper_h_label_var).grid(row=1, column=2, sticky="w")
 
-# Upper S
-ttk.Label(hsv_frame, text="Upper S:").pack(side=tk.LEFT, padx=5)
-ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=upper_s).pack(side=tk.LEFT, padx=5)
-ttk.Label(hsv_frame, textvariable=upper_s_label_var).pack(side=tk.LEFT, padx=5)
+ttk.Label(upper_frame, text="S:").grid(row=2, column=0, sticky="w")
+ttk.Scale(upper_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=upper_s, length=200).grid(row=2, column=1, sticky="ew")
+ttk.Label(upper_frame, textvariable=upper_s_label_var).grid(row=2, column=2, sticky="w")
 
-# Lower V
-ttk.Label(hsv_frame, text="Lower V:").pack(side=tk.LEFT, padx=5)
-ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=lower_v).pack(side=tk.LEFT, padx=5)
-ttk.Label(hsv_frame, textvariable=lower_v_label_var).pack(side=tk.LEFT, padx=5)
+ttk.Label(upper_frame, text="V:").grid(row=3, column=0, sticky="w")
+ttk.Scale(upper_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=upper_v, length=200).grid(row=3, column=1, sticky="ew")
+ttk.Label(upper_frame, textvariable=upper_v_label_var).grid(row=3, column=2, sticky="w")
 
-# Upper V
-ttk.Label(hsv_frame, text="Upper V:").pack(side=tk.LEFT, padx=5)
-ttk.Scale(hsv_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=upper_v).pack(side=tk.LEFT, padx=5)
-ttk.Label(hsv_frame, textvariable=upper_v_label_var).pack(side=tk.LEFT, padx=5)
+# LOWER Section (Vertical Stack)
+ttk.Label(lower_frame, text="LOWER").grid(row=0, column=0, columnspan=2, sticky="w")
+ttk.Label(lower_frame, text="H:").grid(row=1, column=0, sticky="w")
+ttk.Scale(lower_frame, from_=0, to=180, orient=tk.HORIZONTAL, variable=lower_h, length=200).grid(row=1, column=1, sticky="ew")
+ttk.Label(lower_frame, textvariable=lower_h_label_var).grid(row=1, column=2, sticky="w")
+
+ttk.Label(lower_frame, text="S:").grid(row=2, column=0, sticky="w")
+ttk.Scale(lower_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=lower_s, length=200).grid(row=2, column=1, sticky="ew")
+ttk.Label(lower_frame, textvariable=lower_s_label_var).grid(row=2, column=2, sticky="w")
+
+ttk.Label(lower_frame, text="V:").grid(row=3, column=0, sticky="w")
+ttk.Scale(lower_frame, from_=0, to=255, orient=tk.HORIZONTAL, variable=lower_v, length=200).grid(row=3, column=1, sticky="ew")
+ttk.Label(lower_frame, textvariable=lower_v_label_var).grid(row=3, column=2, sticky="w")
+
+# Ensure sliders expand horizontally within their frames
+for frame in [upper_frame, lower_frame]:
+    frame.grid_columnconfigure(1, weight=1)
 
 # Status
-status_label = ttk.Label(root, text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
-status_label.pack(pady=5)
+status_label = ttk.Label(root)
+status_label.grid(row=5, column=0, columnspan=2, pady=5)
+status_label.config(text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
 
 # Terminal window
 terminal_frame = ttk.Frame(root)
-terminal_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+terminal_frame.grid(row=6, column=0, columnspan=2, pady=10, sticky="nsew")
+root.grid_rowconfigure(6, weight=1)  # Allow terminal to expand
 
 terminal_text = tk.Text(terminal_frame, height=10, width=80, bg="black", fg="white", font=("Courier", 10))
 terminal_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -409,22 +444,27 @@ def capture_and_process():
 def display_mask():
     while not stop_event.is_set():
         if not mask_queue.empty():
-            mask = mask_queue.get()
-            cv2.imshow("Mask", mask)
-            cv2.waitKey(1)
-        time.sleep(0.033)
+            mask = mask_queue.get()  # Get the mask from processing
+            # Resize mask to match canvas size (320x180)
+            mask_resized = cv2.resize(mask, (320, 180), interpolation=cv2.INTER_LINEAR)
+            # Convert grayscale mask to RGB for Tkinter
+            mask_rgb = cv2.cvtColor(mask_resized, cv2.COLOR_GRAY2RGB)
+            # Add to queue for GUI display
+            mask_image_queue.put(mask_rgb)
+        time.sleep(0.033)  # ~30 FPS update rate
 
 # GUI update function
 def update_gui():
     global curr_x, curr_y, assist_range, target_x, target_y, assist_enabled
     if not stop_event.is_set():
         try:
+            # Update capture screen
             if not frame_queue.empty():
                 frame = frame_queue.get_nowait()
                 if len(frame.shape) == 3 and frame.shape[2] == 3:
-                    # Resize the frame to fit the GUI (e.g., 640x360)
-                    resized = cv2.resize(frame, (640, 360), interpolation=cv2.INTER_LINEAR)
-                    canvas_width, canvas_height = 640, 360
+                    # Resize the frame to fit the GUI (320x180)
+                    resized = cv2.resize(frame, (320, 180), interpolation=cv2.INTER_LINEAR)
+                    canvas_width, canvas_height = 320, 180
                     
                     # Define the center of the capture region in GUI coordinates
                     center_x_scaled = int(200 * (canvas_width / capture_width))  # capture_width is the width of the capture region
@@ -449,16 +489,23 @@ def update_gui():
                         cv2.line(resized, (center_x_scaled, center_y_scaled), (target_x_scaled, target_y_scaled), (0, 0, 255), 2)
                         cv2.circle(resized, (target_x_scaled, target_y_scaled), 5, (255, 0, 0), -1)
                     
-                    # Convert the frame to a Tkinter-compatible image
+                    # Convert the frame to a Tkinter-compatible image for capture canvas
                     success, encoded = cv2.imencode('.ppm', resized)
                     if success:
                         img = tk.PhotoImage(data=encoded.tobytes())
                         canvas.create_image(0, 0, image=img, anchor='nw')
-                        canvas.image = img
+                        canvas.image = img  # Keep reference to avoid garbage collection
                     else:
                         print("Failed to encode image to PPM")
-                else:
-                    print("Invalid image format:", frame.shape)
+
+            # Update mask screen
+            if not mask_image_queue.empty():
+                mask_image = mask_image_queue.get_nowait()
+                # Convert mask to Tkinter-compatible image
+                mask_img = tk.PhotoImage(data=cv2.imencode('.ppm', mask_image)[1].tobytes())
+                mask_canvas.create_image(0, 0, image=mask_img, anchor='nw')
+                mask_canvas.image = mask_img  # Keep reference to avoid garbage collection
+
         except Exception as e:
             print(f"GUI update error: {e}")
         root.after(33, update_gui)  # Update every ~33ms (30 FPS)
