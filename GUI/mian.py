@@ -12,6 +12,7 @@ import colorsys
 import math
 from queue import Queue
 import json
+import sys
 
 # Function to convert RGB to HSV
 def rgb_to_hsv(r, g, b):
@@ -51,7 +52,7 @@ except Exception as e:
 # GUI control functions
 def update_range(val):
     global assist_range
-    assist_range = int(float(val))
+    assist_range = min(200, int(float(val))) # Cap at 200px
     range_label.config(text=f"Range Radius: {assist_range} px")
 
 def update_speed(val):
@@ -160,7 +161,7 @@ ttk.Checkbutton(control_frame, text="Enable Aim Assist", variable=assist_var, co
 # Range Slider
 range_label = ttk.Label(control_frame, text=f"Range Radius: {assist_range} px")
 range_label.pack(side=tk.LEFT, padx=5)
-range_slider = ttk.Scale(control_frame, from_=20, to=500, orient=tk.HORIZONTAL, command=update_range)
+range_slider = ttk.Scale(control_frame, from_=20, to=200, orient=tk.HORIZONTAL, command=update_range)
 range_slider.pack(side=tk.LEFT, padx=5)
 range_slider.set(assist_range)
 
@@ -255,6 +256,30 @@ ttk.Label(hsv_frame, textvariable=upper_v_label_var).pack(side=tk.LEFT, padx=5)
 # Status
 status_label = ttk.Label(root, text=f"Assist: Disabled | VNC: {'Connected' if vnc_connected else 'Disconnected'}")
 status_label.pack(pady=5)
+
+# _______ Terminal window ________
+terminal_frame = ttk.Frame(root)
+terminal_frame.pack(pady=10, fill=tk.BOTH, expand=True)
+
+terminal_text = tk.Text(terminal_frame, height=10, width=80, bg="black", fg="white", font=("Courier", 10))
+terminal_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+scrollbar = ttk.Scrollbar(terminal_frame, orient="vertical", command=terminal_text.yview)
+scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+terminal_text.config(yscrollcommand=scrollbar.set)
+
+class RedirectText:
+    def __init__(self, widget):
+        self.widget = widget
+
+    def write(self, text):
+        self.widget.insert(tk.END, text)
+        self.widget.see(tk.END)
+
+    def flush(self):
+        pass
+
+sys.stdout = RedirectText(terminal_text)
 
 # Screen capture function
 def update_screen():
