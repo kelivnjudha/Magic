@@ -13,6 +13,7 @@ import math
 from queue import Queue
 import json
 import sys
+import ndi
 
 # Function to convert RGB to HSV
 def rgb_to_hsv(r, g, b):
@@ -322,20 +323,44 @@ class RedirectText:
 
 sys.stdout = RedirectText(terminal_text)
 
-# Screen capture function
+# Screen capture function (MSS code)
+# def update_screen():
+#     global screen_frame
+#     with mss() as sct:
+#         monitor = {"top": capture_top, "left": capture_left, "width": capture_width, "height": capture_height}
+#         while not stop_event.is_set():
+#             if not frame_queue.full():
+#                 screen = sct.grab(monitor)
+#                 frame = np.array(screen)
+#                 frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+#                 with screen_lock:
+#                     screen_frame = frame
+#                 frame_queue.put(frame)
+#             time.sleep(0.002)
+
+# Screen Capture function ndi
 def update_screen():
     global screen_frame
-    with mss() as sct:
-        monitor = {"top": capture_top, "left": capture_left, "width": capture_width, "height": capture_height}
-        while not stop_event.is_set():
-            if not frame_queue.full():
-                screen = sct.grab(monitor)
-                frame = np.array(screen)
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-                with screen_lock:
-                    screen_frame = frame
-                frame_queue.put(frame)
-            time.sleep(0.002)
+    # Initialize NDI
+    ndi.initialize()
+    # Find the NDI source (use the name from your gaming PC)
+    source = ndi.find_source("OBS")  # Adjust if you named it differently
+    receiver = ndi.create_receiver(source)
+    
+    while not stop_event.is_set():  # Assuming you have a stop_event to exit the loop
+        # Receive the frame
+        frame = receiver.read()
+        if frame is not None:
+            # Convert NDI’s BGRA format to BGR for OpenCV
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+            with screen_lock:  # Assuming you use a lock for thread safety
+                screen_frame = frame
+            frame_queue.put(frame)  # Assuming you use a queue to pass frames
+        time.sleep(0.002)  # Small delay to avoid overloading
+    # Clean up
+    ndi.destroy_receiver(receiver)
+    ndi.destroy()
+
 
 # Core aim assist processing function
 def capture_and_process():
