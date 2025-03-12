@@ -13,7 +13,7 @@ import math
 from queue import Queue
 import json
 import sys
-import ndi
+import NDIlib as ndi
 
 # Function to convert RGB to HSV
 def rgb_to_hsv(r, g, b):
@@ -148,8 +148,15 @@ def update_color_label(color):
 
 # GUI Setup
 root = tk.Tk()
-icon = tk.PhotoImage(file='logo.png')
-root.iconphoto(False, icon)
+
+try:
+    # Set taskbar icon using .ico
+    root.iconbitmap('logo.ico')  # Requires logo.ico in the same directory
+    # Set window icon using .png (optional)
+    icon = tk.PhotoImage(file='logo.png')
+    root.iconphoto(True, icon)
+except Exception as e:
+    print(f"Failed to load icon: {e}. Using default icon.")
 root.title("Magic Assist Beta v1 (Main PC) - Python 3.10.11")
 root.geometry("700x700")  # Adjusted to fit two 320x180 canvases side by side
 print("Tkinter root initialized.")
@@ -341,26 +348,87 @@ sys.stdout = RedirectText(terminal_text)
 # Screen Capture function ndi
 def update_screen():
     global screen_frame
-    # Initialize NDI
-    ndi.initialize()
-    # Find the NDI source (use the name from your gaming PC)
-    source = ndi.find_source("OBS")  # Adjust if you named it differently
-    receiver = ndi.create_receiver(source)
-    
-    while not stop_event.is_set():  # Assuming you have a stop_event to exit the loop
-        # Receive the frame
-        frame = receiver.read()
-        if frame is not None:
-            # Convert NDI’s BGRA format to BGR for OpenCV
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
-            with screen_lock:  # Assuming you use a lock for thread safety
-                screen_frame = frame
-            frame_queue.put(frame)  # Assuming you use a queue to pass frames
-        time.sleep(0.002)  # Small delay to avoid overloading
-    # Clean up
-    ndi.destroy_receiver(receiver)
-    ndi.destroy()
+    try:
+        # Initialize NDI
+        if not ndi.initialize():
+            print("Failed to initialize NDI.")
+            return
 
+        # Create NDI finder
+        finder = ndi.find_create_v2()
+        if not finder:
+            print("Failed to create NDI finder.")
+            ndi.destroy()
+            return
+
+        # Wait for NDI sources
+        if not ndi.find_wait_for_sources(finder, 5000):
+            print("No NDI sources found within 5 seconds.")
+            ndi.find_destroy(finder)
+            ndi.destroy()
+            return
+
+        # Get available NDI sources
+        sources = ndi.find_get_current_sources(finder)
+        selected_source = None
+        for source in sources:
+            if "OBS" in source.ndi_name:  # Adjust based on your OBS NDI source name
+                selected_source = source
+                break
+
+        if not selected_source:
+            print("No matching NDI source found. Available sources:", [s.ndi_name for s in sources])
+            ndi.find_destroy(finder)
+            ndi.destroy()
+            return
+
+        # Create and connect NDI receiver
+        receiver = ndi.recv_create_v3()
+        if not receiver:
+            print("Failed to create NDI receiver.")
+            ndi.find_destroy(finder)
+            ndi.destroy()
+            return
+
+        ndi.recv_connect(receiver, selected_source)
+        print(f"Connected to NDI source: {selected_source.ndi_name}")
+
+        # Main loop to capture frames
+        while not stop_event.is_set():
+            frame_type, video_frame, _, _ = ndi.recv_capture_v2(receiver, 5000)
+            if frame_type == ndi.FRAME_TYPE_VIDEO:
+                # Debug: Print available attributes
+                #print("Video frame received. Attributes:", dir(video_frame))
+
+                # Access correct attributes
+                width = video_frame.xres
+                height = video_frame.yres
+                stride = video_frame.line_stride_in_bytes
+
+                # Convert raw frame data to NumPy array
+                frame_data = np.frombuffer(video_frame.data, dtype=np.uint8)
+                frame_data = frame_data.reshape((height, stride // 4, 4))  # Assuming BGRA format
+
+                # Convert BGRA to BGR for OpenCV
+                frame = cv2.cvtColor(frame_data, cv2.COLOR_BGRA2BGR)
+
+                # Update shared frame
+                with screen_lock:
+                    screen_frame = frame
+                frame_queue.put(frame)
+            else:
+                print("No video frame received.")
+
+            time.sleep(0.002)  # Small delay to prevent CPU overload
+
+        # Cleanup
+        ndi.recv_destroy(receiver)
+        ndi.find_destroy(finder)
+        ndi.destroy()
+        print("NDI resources cleaned up.")
+
+    except Exception as e:
+        print(f"NDI error in update_screen: {e}")
 
 # Core aim assist processing function
 def capture_and_process():
