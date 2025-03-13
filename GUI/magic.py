@@ -351,33 +351,32 @@ def update_screen():
     try:
         # Initialize NDI
         if not ndi.initialize():
-            print("Failed to initialize NDI.")
+            print("Failed to initialize NDI. Please ensure the NDI Runtime is installed from https://ndi.video/tools/.")
             return
 
         # Create NDI finder
         finder = ndi.find_create_v2()
         if not finder:
-            print("Failed to create NDI finder.")
+            print("Failed to create NDI finder. Please reinstall the NDI Runtime or check your network settings.")
             ndi.destroy()
             return
 
-        # Wait for NDI sources
-        if not ndi.find_wait_for_sources(finder, 5000):
-            print("No NDI sources found within 5 seconds.")
-            ndi.find_destroy(finder)
-            ndi.destroy()
-            return
-
-        # Get available NDI sources
-        sources = ndi.find_get_current_sources(finder)
+        # Continuously search for NDI sources until found
         selected_source = None
-        for source in sources:
-            if "OBS" in source.ndi_name:  # Adjust based on your OBS NDI source name
-                selected_source = source
-                break
+        while not stop_event.is_set() and not selected_source:
+            sources = ndi.find_get_current_sources(finder)
+            for source in sources:
+                if 'OBS' in source.ndi_name:  # Adjust based on your OBS NDI source name
+                    selected_source = source
+                    break
+            if not selected_source:
+                print("No matching NDI source found (e.g., 'OBS'). Searching...")
+                print("Please start OBS with NDI output enabled on the main PC or check network/firewall settings.")
+                time.sleep(2)  # Wait 2 seconds before retrying
 
-        if not selected_source:
-            print("No matching NDI source found. Available sources:", [s.ndi_name for s in sources])
+        if not selected_source and not stop_event.is_set():
+            print("No NDI source matching 'OBS' found. Available sources:", [s.ndi_name for s in sources])
+            print("Please start OBS with NDI output enabled and ensure the source name contains 'OBS'. Check network connectivity and firewall settings (allow UDP 5353, TCP/UDP 5960-5970).")
             ndi.find_destroy(finder)
             ndi.destroy()
             return
@@ -385,21 +384,17 @@ def update_screen():
         # Create and connect NDI receiver
         receiver = ndi.recv_create_v3()
         if not receiver:
-            print("Failed to create NDI receiver.")
+            print("Failed to create NDI receiver. Please reinstall the NDI Runtime.")
             ndi.find_destroy(finder)
             ndi.destroy()
             return
 
         ndi.recv_connect(receiver, selected_source)
-        print(f"Connected to NDI source: {selected_source.ndi_name}")
 
         # Main loop to capture frames
         while not stop_event.is_set():
             frame_type, video_frame, _, _ = ndi.recv_capture_v2(receiver, 5000)
             if frame_type == ndi.FRAME_TYPE_VIDEO:
-                # Debug: Print available attributes
-                #print("Video frame received. Attributes:", dir(video_frame))
-
                 # Access correct attributes
                 width = video_frame.xres
                 height = video_frame.yres
@@ -415,9 +410,10 @@ def update_screen():
                 # Update shared frame
                 with screen_lock:
                     screen_frame = frame
-                frame_queue.put(frame)
+                if not frame_queue.full():
+                    frame_queue.put(frame)
             else:
-                print("No video frame received.")
+                print("No video frame received. Please ensure OBS is streaming a video source (not a blank scene).")
 
             time.sleep(0.002)  # Small delay to prevent CPU overload
 
@@ -428,7 +424,7 @@ def update_screen():
         print("NDI resources cleaned up.")
 
     except Exception as e:
-        print(f"NDI error in update_screen: {e}")
+        print(f"NDI error in update_screen: {e}. Please check your NDI setup or reinstall the NDI Runtime and try again.")
 
 # Core aim assist processing function
 def capture_and_process():
