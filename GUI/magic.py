@@ -47,9 +47,11 @@ capture_top = 428
 capture_width = 400
 capture_height = 225
 
+vnc_ip = input('Enter your main pc ip (type ipconfig in cmd) : ')
+
 # Setup VNC to Main PC
 try:
-    vnc = api.connect("127.0.0.1", password="200210")
+    vnc = api.connect(vnc_ip, password="200210")
     vnc_connected = True
     print("VNC Server connected successfully to 127.0.0.1:5900")
 except Exception as e:
