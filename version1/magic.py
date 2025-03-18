@@ -186,7 +186,7 @@ class AimThread(QThread):
                 frame = screen_frame
             if frame is None or not assist_enabled:
                 print("No frame or assist disabled—waiting...")
-                time.sleep(0.005)
+                time.sleep(0.001) # Reduce Delay for more frequent updates
                 continue
             
             print("Processing frame...")
@@ -237,11 +237,11 @@ class AimThread(QThread):
                     dx_screen = dx_frame * scale_x
                     dy_screen = dy_frame * scale_y
                     # Adjust for sensitivity
-                    sensitivity_multiplier = 0.1  # Tune this value (e.g., 0.05 to 0.5)
+                    sensitivity_multiplier = 0.5  # Tune this value (e.g., 0.05 to 0.5)
                     dx_nudge = dx_screen * sensitivity_multiplier
                     dy_nudge = dy_screen * sensitivity_multiplier
                     # Cap the nudge to prevent extreme movements
-                    max_nudge = 50  # Pixels
+                    max_nudge = 1  # Pixels
                     dx_nudge = max(-max_nudge, min(dx_nudge, max_nudge))
                     dy_nudge = max(-max_nudge, min(dy_nudge, max_nudge))
                     dx, dy = dx_nudge, dy_nudge

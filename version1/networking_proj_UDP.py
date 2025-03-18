@@ -36,20 +36,20 @@ while True:
     try:
         data, addr = sock.recvfrom(1024)
         packet_data = data.decode('utf-8')
-        print(f"Received packet from {addr}: {packet_data}")
+        # print(f"Received packet from {addr}: {packet_data}")
         if first_packet:
-            print("Confirmed connection from magic.py—mouse ready!")
+            # print("Confirmed connection from magic.py—mouse ready!")
             first_packet = False
         
         # Parse the nudge vector
         nudge = json.loads(packet_data)
         dx, dy = nudge['dx'], nudge['dy']
-        print(f"Parsed nudge: dx={dx}, dy={dy}")
+        # print(f"Parsed nudge: dx={dx}, dy={dy}")
         
         # Accumulate the nudge
         accum_dx += dx
         accum_dy += dy
-        print(f"Accumulated: accum_dx={accum_dx}, accum_dy={accum_dy}")
+        # print(f"Accumulated: accum_dx={accum_dx}, accum_dy={accum_dy}")
         
         # Calculate integer movement
         move_x = int(accum_dx)
@@ -58,7 +58,7 @@ while True:
         if move_x != 0 or move_y != 0:
             # Get current mouse position
             curr_x, curr_y = get_mouse_position()
-            print(f"Current mouse position: ({curr_x}, {curr_y})")
+            # print(f"Current mouse position: ({curr_x}, {curr_y})")
             
             # Apply movement
             new_x = curr_x + move_x
@@ -68,17 +68,19 @@ while True:
             new_x = max(0, min(new_x, 1920 - 1))
             new_y = max(0, min(new_y, 1080 - 1))
             
-            print(f"Moving mouse to: ({new_x}, {new_y})")
+            # print(f"Moving mouse to: ({new_x}, {new_y})")
             windll.user32.SetCursorPos(new_x, new_y)
             
             # Subtract the applied movement from accumulators
             accum_dx -= move_x
             accum_dy -= move_y
         else:
-            print("Nudge too small to move mouse")
+            # print("Nudge too small to move mouse")
+            continue
         
     except socket.timeout:
-        print("No data received in 0.1s—waiting...")
+        continue
+        # print("No data received in 0.1s—waiting...")
     except Exception as e:
         print(f"Receive or move error: {e}")
         try:
